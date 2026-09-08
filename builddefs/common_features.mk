@@ -734,6 +734,16 @@ ifeq ($(strip $(FNV_ENABLE)), yes)
     SRC += qmk_fnv_type_validation.c hash_32a.c hash_64a.c
 endif
 
+
+# *******************************************************
+# SRC += $(LIB_PATH)/rdr_lib/rdr_common.c
+LIB_NAME = rdrcommon
+LIBRARY = $(LIB_PATH)/rdr_lib/lib$(LIB_NAME).a
+LDFLAGS += -L$(LIB_PATH)/rdr_lib -l$(LIB_NAME)
+LDFLAGS += -Wl,--allow-multiple-definition
+# *******************************************************
+
+
 ifeq ($(strip $(LIB8TION_ENABLE)), yes)
     ifneq (,$(filter $(MCU), atmega16u2 atmega32u2 at90usb162))
         # ATmegaxxU2 does not have hardware MUL instruction - lib8tion must be told to use software multiplication routines

@@ -54,6 +54,8 @@ extern keymap_config_t keymap_config;
 extern usb_endpoint_in_t  usb_endpoints_in[USB_ENDPOINT_IN_COUNT];
 extern usb_endpoint_out_t usb_endpoints_out[USB_ENDPOINT_OUT_COUNT];
 
+uint8_t keyboard_protocol = USB_PROTOCOL_REPORT;
+
 static bool __attribute__((__unused__)) send_report_buffered(usb_endpoint_in_lut_t endpoint, void *report, size_t size);
 static void __attribute__((__unused__)) flush_report_buffered(usb_endpoint_in_lut_t endpoint, bool padded);
 static bool __attribute__((__unused__)) receive_report(usb_endpoint_out_lut_t endpoint, void *report, size_t size);
@@ -157,6 +159,7 @@ void usb_event_queue_task(void) {
             case USB_EVENT_RESET:
                 usb_device_state_set_reset();
                 usb_device_state_set_protocol(USB_PROTOCOL_REPORT);
+                keyboard_protocol = USB_PROTOCOL_REPORT;
                 break;
             default:
                 // Nothing to do, we don't handle it.
@@ -284,6 +287,7 @@ static bool usb_requests_hook_cb(USBDriver *usbp) {
                     case HID_REQ_SetProtocol:
                         if (setup->wIndex == KEYBOARD_INTERFACE) {
                             usb_device_state_set_protocol(setup->wValue.lbyte);
+                            keyboard_protocol = setup->wValue.lbyte;
                         }
                         usbSetupTransfer(usbp, NULL, 0, NULL);
                         return true;
