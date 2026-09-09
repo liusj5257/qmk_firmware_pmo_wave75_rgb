@@ -19,3 +19,4 @@ BLUETOOTH_CUSTOM = yes
 ENCODER_MAP_ENABLE = yes    # Enable ENCODER MAP
 ENCODER_DRIVER = custom
 DEBOUNCE_TYPE = asym_eager_defer_pk
+RGB_MATRIX_CUSTOM_KB = yes
