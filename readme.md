@@ -1,7 +1,8 @@
 # PMO_WAVE75_RGB 官方固件移植到最新版仓库
 
 ## 这个三方库需要修改宏定义才能编译成功
-![alt text](image.png)
+<img width="2145" height="375" alt="image" src="https://github.com/user-attachments/assets/b1937c70-34d1-40c0-a3ed-90dfba25eee6" />
+
 
 
 # Quantum Mechanical Keyboard Firmware
