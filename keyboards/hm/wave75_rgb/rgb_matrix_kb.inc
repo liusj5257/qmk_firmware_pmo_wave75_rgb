@@ -10,22 +10,31 @@
 #define HEART_PINK_G 0
 #define HEART_PINK_B 40
 #define HEART_BLUE_R 0
-#define HEART_BLUE_G 255
+#define HEART_BLUE_G 0
 #define HEART_BLUE_B 255
+#define HEART_RED_R 255
+#define HEART_RED_G 0
+#define HEART_RED_B 0
 
-// Lower the number for a denser effect / wider keyboard.
-#ifndef RGB_DIGITAL_RAIN_DROPS
-#    define RGB_DIGITAL_RAIN_DROPS 24
-#endif
+#define BG_VAL_MIN 59
+#define BG_VAL_MAX 60
+
+// 心跳周期范围（由 VIA 速度控制映射到此区间）
+#define HEARTBEAT_PERIOD_SLOW_MS 2400
+#define HEARTBEAT_PERIOD_FAST_MS 400
+#define RIPPLE_WIDTH 40
+
+// 星尘参数
+#define STARDust_COUNT 16
+#define STARDust_DECAY_MS 1800
+#define STARDust_MAX_BRIGHT 200
 
 RGB_MATRIX_EFFECT(HEART_AEMEATH)
 
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 
-#    ifdef RGB_MATRIX_FRAMEBUFFER_EFFECTS
-
-// LED indices that form the heart region: digital rain is confined to these.
-#        define HEART_LED_COUNT 20
+// LED indices that form the heart region
+#    define HEART_LED_COUNT 20
 static const uint8_t HEART_LEDS[HEART_LED_COUNT] = {
     23, 24, 26, 27,
     37, 38, 39, 40, 41, 42,
@@ -34,164 +43,247 @@ static const uint8_t HEART_LEDS[HEART_LED_COUNT] = {
     77,
 };
 
+// 每帧算一次的心跳状态，避免每个 LED 重复做除法
+static uint16_t heart_phase = 0;  // 0..255
+static uint8_t  heart_pulse = 0;  // 0..255，三角波
+static bool     heart_ripple_active = false;
+static uint16_t heart_ripple_phase = 0;  // 纹波独立相位，峰值出现即开始推进
+
 static bool heart_aemeath_led_in_region(uint8_t led) {
     for (uint8_t i = 0; i < HEART_LED_COUNT; i++) {
-        if (HEART_LEDS[i] == led) {
-            return true;
-        }
+        if (HEART_LEDS[i] == led) return true;
     }
     return false;
 }
 
-// Digital rain restricted to the heart region; every other LED stays off.
-static bool HEART_AEMEATH(effect_params_t *params) {
-    // algorithm ported from https://github.com/tremby/Kaleidoscope-LEDEffect-DigitalRain
-    const uint8_t max_intensity = rgb_matrix_config.hsv.v;
-    static uint8_t drop  = 0;
-    static uint8_t decay = 0;
-
-    if (params->init) {
-        rgb_matrix_set_color_all(0, 0, 0);
-        memset(g_rgb_frame_buffer, 0, sizeof(g_rgb_frame_buffer));
-        drop  = 0;
-        decay = 0;
-    }
-
-    if (max_intensity == 0) {
-        // RGB matrix off / zero brightness: nothing to draw
-        return false;
-    }
-
-    const uint8_t drop_ticks           = 28;
-    const uint8_t pure_green_intensity = (((uint16_t)max_intensity) * 3) >> 2;
-    const uint8_t max_brightness_boost = (((uint16_t)max_intensity) * 3) >> 2;
-    const uint8_t decay_ticks          = 0xff / max_intensity;
-
-    decay++;
-    for (uint8_t col = 0; col < MATRIX_COLS; col++) {
-        for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
-            if (row == 0 && drop == 0 && rand() < RAND_MAX / RGB_DIGITAL_RAIN_DROPS) {
-                // top row, pixels have just fallen and we're
-                // making a new rain drop in this column
-                g_rgb_frame_buffer[row][col] = max_intensity;
-            } else if (g_rgb_frame_buffer[row][col] > 0 && g_rgb_frame_buffer[row][col] < max_intensity) {
-                // neither fully bright nor dark, decay it
-                if (decay == decay_ticks) {
-                    g_rgb_frame_buffer[row][col]--;
-                }
-            }
-
-            // set the pixel colour, but only for LEDs inside the heart region
-            uint8_t led[LED_HITS_TO_REMEMBER];
-            uint8_t led_count = rgb_matrix_map_row_column_to_led(row, col, led);
-            if (led_count > 0) {
-                const uint8_t rain = g_rgb_frame_buffer[row][col];
-                for (uint8_t index = 0; index < led_count; index++) {
-                    if (!heart_aemeath_led_in_region(led[index])) {
-                        // outside the heart region: keep the LED off
-                        rgb_matrix_set_color(led[index], 0, 0, 0);
-                        continue;
-                    }
-
-                    if (rain > pure_green_intensity) {
-                        const uint8_t boost = (uint8_t)((uint16_t)max_brightness_boost * (rain - pure_green_intensity) / (max_intensity - pure_green_intensity));
-                        rgb_matrix_set_color(led[index], boost, max_intensity, boost);
-                    } else if (rain > 0) {
-                        const uint8_t green = (uint8_t)((uint16_t)max_intensity * rain / pure_green_intensity);
-                        rgb_matrix_set_color(led[index], 0, green, 0);
-                    } else {
-                        rgb_matrix_set_color(led[index], 0, 0, 0);
-                    }
-                }
-            }
-        }
-    }
-
-    if (decay == decay_ticks) {
-        decay = 0;
-    }
-
-    if (++drop > drop_ticks) {
-        // reset drop timer
-        drop = 0;
-        for (uint8_t row = MATRIX_ROWS - 1; row > 0; row--) {
-            for (uint8_t col = 0; col < MATRIX_COLS; col++) {
-                // if this is on the bottom row and bright allow decay
-                if (row == MATRIX_ROWS - 1 && g_rgb_frame_buffer[row][col] == max_intensity) {
-                    g_rgb_frame_buffer[row][col]--;
-                }
-                // check if the pixel above is bright
-                if (g_rgb_frame_buffer[row - 1][col] >= max_intensity) { // Note: can be larger than max_intensity if val was recently decreased
-                    // allow old bright pixel to decay
-                    g_rgb_frame_buffer[row - 1][col] = max_intensity - 1;
-                    // make this pixel bright
-                    g_rgb_frame_buffer[row][col] = max_intensity;
-                }
-            }
-        }
-    }
-
-    return false;
-}
-
-#    else // RGB_MATRIX_FRAMEBUFFER_EFFECTS
-
-// Fallback: framebuffer not enabled -> keep the original static gradient heart.
 static uint8_t heart_aemeath_mix(uint8_t first, uint8_t second, uint8_t amount) {
     return scale8(first, 255 - amount) + scale8(second, amount);
 }
 
-static void heart_aemeath_set_color(uint8_t led, uint8_t gradient) {
-    rgb_matrix_set_color(
-        led,
-        heart_aemeath_mix(HEART_PINK_R, HEART_BLUE_R, gradient),
-        heart_aemeath_mix(HEART_PINK_G, HEART_BLUE_G, gradient),
-        heart_aemeath_mix(HEART_PINK_B, HEART_BLUE_B, gradient)
-    );
+static uint8_t heart_aemeath_gradient(uint8_t led) {
+    switch (led) {
+        case 23: case 24: case 26: case 27: return 0;
+        case 37: case 38: case 39: case 40: case 41: case 42: return 40;
+        case 53: case 54: case 55: case 56: case 57: return 128;
+        case 67: case 68: case 69: case 70: return 216;
+        case 77: return 255;
+        default: return 0;
+    }
 }
 
-static bool HEART_AEMEATH(effect_params_t *params) {
-    RGB_MATRIX_USE_LIMITS_ITER(min, max, params->iter);
+static void heart_aemeath_calc_center(uint8_t *cx, uint8_t *cy) {
+    uint16_t sum_x = 0, sum_y = 0;
+    for (uint8_t i = 0; i < HEART_LED_COUNT; i++) {
+        sum_x += g_led_config.point[HEART_LEDS[i]].x;
+        sum_y += g_led_config.point[HEART_LEDS[i]].y;
+    }
+    *cx = (uint8_t)(sum_x / HEART_LED_COUNT);
+    *cy = (uint8_t)(sum_y / HEART_LED_COUNT);
+}
 
-    for (uint8_t i = min; i < max; i++) {
-        RGB_MATRIX_TEST_LED_FLAGS();
+// 根据当前速度更新心跳相位与脉冲（每帧调用一次）。
+// 一个周期分为：峰值停顿、下降、谷值停顿、上升；两个极值都停顿一个基础周期。
+static void heart_aemeath_update_timing(uint32_t now) {
+    uint8_t  speed = rgb_matrix_get_speed();   // 0..255
+    // 速度 0 → 慢（周期长），速度 255 → 快（周期短）
+    uint16_t period = HEARTBEAT_PERIOD_SLOW_MS -
+                      ((uint16_t)speed * (HEARTBEAT_PERIOD_SLOW_MS - HEARTBEAT_PERIOD_FAST_MS) / 255);
+    if (period < 32) period = 32;  // 防止除零/周期太小
 
-        switch (i) {
-            case 23:
-            case 24:
-            case 26:
-            case 27:
-                heart_aemeath_set_color(i, 0);
-                break;
-            case 37:
-            case 38:
-            case 39:
-            case 40:
-            case 41:
-            case 42:
-                heart_aemeath_set_color(i, 40);
-                break;
-            case 53:
-            case 54:
-            case 55:
-            case 56:
-            case 57:
-                heart_aemeath_set_color(i, 128);
-                break;
-            case 67:
-            case 68:
-            case 69:
-            case 70:
-                heart_aemeath_set_color(i, 216);
-                break;
-            case 77:
-                heart_aemeath_set_color(i, 255);
-                break;
+    const uint16_t half = period / 2;
+    const uint16_t pause = period;
+    const uint16_t cycle = period * 3;
+    const uint16_t elapsed = (uint16_t)(now % cycle);
+
+    if (elapsed < pause) {
+        // 峰值停顿：峰值出现时同步触发纹波。
+        heart_ripple_active = true;
+        heart_phase = 0;
+        heart_pulse = 255;
+        heart_ripple_phase = (uint16_t)((uint32_t)elapsed * 128 / pause);
+    } else if (elapsed < pause + half) {
+        // 从峰值下降到谷值，纹波随峰值同步向外扩散。
+        heart_ripple_active = true;
+        heart_phase = (uint16_t)((uint32_t)(elapsed - pause) * 128 / half);
+        heart_pulse = 255 - heart_phase * 2;
+        heart_ripple_phase = (uint16_t)(128 + (uint32_t)(elapsed - pause) * 128 / half);
+    } else if (elapsed < pause + half + pause) {
+        // 谷值停顿一个周期，且不重复触发纹波。
+        heart_ripple_active = false;
+        heart_phase = 128;
+        heart_pulse = 0;
+        heart_ripple_phase = 255;
+    } else {
+        // 从谷值回升到下一次峰值。
+        heart_ripple_active = false;
+        heart_phase = (uint16_t)(128 + (uint32_t)(elapsed - pause - half - pause) * 128 / half);
+        heart_pulse = (heart_phase - 128) * 2;
+        heart_ripple_phase = 255;
+    }
+}
+
+// --- 星尘 ---
+typedef struct {
+    uint8_t  led;
+    uint32_t birth;
+} stardust_t;
+
+static stardust_t stardust[STARDust_COUNT];
+static uint32_t  stardust_next_spawn = 0;
+
+static void heart_aemeath_stardust_init(void) {
+    for (uint8_t i = 0; i < STARDust_COUNT; i++) {
+        stardust[i].led   = 0;
+        stardust[i].birth = 0;
+    }
+    stardust_next_spawn = timer_read32() + 100 + rand() % 500;
+}
+
+static uint8_t heart_aemeath_stardust_get(uint8_t led, uint32_t now) {
+    for (uint8_t i = 0; i < STARDust_COUNT; i++) {
+        if (stardust[i].led == led && stardust[i].birth > 0) {
+            uint32_t elapsed = now - stardust[i].birth;
+            if (elapsed < STARDust_DECAY_MS) {
+                if (elapsed < 300) return 255;
+                return 255 - (uint8_t)((uint32_t)255 * (elapsed - 300) / (STARDust_DECAY_MS - 300));
+            }
+            stardust[i].birth = 0;
+        }
+    }
+    return 0;
+}
+
+static void heart_aemeath_stardust_spawn(uint32_t now) {
+    if ((int32_t)(now - stardust_next_spawn) < 0) return;
+
+    for (uint8_t i = 0; i < STARDust_COUNT; i++) {
+        if (stardust[i].birth == 0) {
+            uint8_t attempts  = 0;
+            uint8_t candidate;
+            do {
+                candidate = rand() % RGB_MATRIX_LED_COUNT;
+                attempts++;
+            } while (heart_aemeath_led_in_region(candidate) && attempts < 50);
+
+            if (!heart_aemeath_led_in_region(candidate)) {
+                stardust[i].led   = candidate;
+                stardust[i].birth = now;
+            }
+            break;
         }
     }
 
-    return rgb_matrix_check_finished_leds(max);
+    // 生成间隔也跟速度挂钩：速度快时星尘更密
+    uint8_t  speed = rgb_matrix_get_speed();
+    uint16_t base  = 1200 - (uint16_t)speed * 1000 / 255;  // 1200ms（慢）→ 200ms（快）
+    stardust_next_spawn = now + base / 2 + rand() % (base / 2 + 1);
 }
-#    endif // RGB_MATRIX_FRAMEBUFFER_EFFECTS
+
+// --- 向外扩散的心跳涟漪 ---
+static uint8_t heart_aemeath_ripple(uint8_t led_x, uint8_t led_y,
+                                     uint8_t heart_cx, uint8_t heart_cy) {
+    int16_t dx = (int16_t)led_x - (int16_t)heart_cx;
+    int16_t dy = (int16_t)led_y - (int16_t)heart_cy;
+    uint16_t dist = (uint16_t)sqrt16((uint32_t)(dx * dx + dy * dy));
+
+    if (dist < 10) return 0;
+    if (!heart_ripple_active) return 0;
+
+    uint16_t phase = heart_ripple_phase;
+
+    uint8_t ripple_radius = (uint8_t)((uint16_t)phase * 200 / 256);
+
+    int16_t delta = (int16_t)dist - (int16_t)ripple_radius;
+    if (delta < 0) delta = -delta;
+    if (delta >= RIPPLE_WIDTH) return 0;
+
+    uint8_t brightness = (uint8_t)((uint16_t)(RIPPLE_WIDTH - delta) * 255 / RIPPLE_WIDTH);
+
+    if (dist > 60) {
+        uint16_t fade = (uint16_t)(dist - 60) * 255 / 140;
+        if (fade > 255) fade = 255;
+        brightness = scale8(brightness, 255 - (uint8_t)fade);
+    }
+
+    if (phase > 200) brightness = 0;
+
+    return brightness;
+}
+
+// --- 心形 LED 颜色：基础渐变 + 向纯红呼吸 ---
+static void heart_aemeath_set_heart_color(uint8_t led, uint8_t max_intensity) {
+    uint8_t gradient = heart_aemeath_gradient(led);
+
+    uint8_t base_r = heart_aemeath_mix(HEART_PINK_R, HEART_BLUE_R, gradient);
+    uint8_t base_g = heart_aemeath_mix(HEART_PINK_G, HEART_BLUE_G, gradient);
+    uint8_t base_b = heart_aemeath_mix(HEART_PINK_B, HEART_BLUE_B, gradient);
+
+    uint8_t pulse = heart_pulse;
+
+    uint8_t r = heart_aemeath_mix(base_r, HEART_RED_R, pulse);
+    uint8_t g = heart_aemeath_mix(base_g, HEART_RED_G, pulse);
+    uint8_t b = heart_aemeath_mix(base_b, HEART_RED_B, pulse);
+
+    rgb_matrix_set_color(led, scale8(r, max_intensity), scale8(g, max_intensity), scale8(b, max_intensity));
+}
+
+// --- 心外 LED 颜色 ---
+static void heart_aemeath_set_bg_color(uint8_t led, uint8_t heart_cx, uint8_t heart_cy,
+                                        uint8_t max_intensity) {
+    uint8_t bg_val = BG_VAL_MIN;
+    uint8_t bg_r   = bg_val;
+    uint8_t bg_g   = scale8(bg_val, 80);
+    uint8_t bg_b   = scale8(bg_val, 160);
+
+    uint8_t ripple = heart_aemeath_ripple(
+        g_led_config.point[led].x, g_led_config.point[led].y,
+        heart_cx, heart_cy);
+
+    uint8_t ripple_r = scale8(ripple, 255);
+    uint8_t ripple_g = scale8(ripple, 0);
+    uint8_t ripple_b = scale8(ripple, 40);
+
+    uint8_t dust = heart_aemeath_stardust_get(led, timer_read32());
+    dust = scale8(dust, STARDust_MAX_BRIGHT);
+    uint8_t dust_r = scale8(dust, 200);
+    uint8_t dust_g = scale8(dust, 220);
+    uint8_t dust_b = scale8(dust, 255);
+
+    uint8_t r = qadd8(bg_r, ripple_r);
+    uint8_t g = qadd8(bg_g, ripple_g);
+    uint8_t b = qadd8(bg_b, ripple_b);
+
+    r = qadd8(r, scale8(dust_r, 255 - r));
+    g = qadd8(g, scale8(dust_g, 255 - g));
+    b = qadd8(b, scale8(dust_b, 255 - b));
+
+    rgb_matrix_set_color(led, scale8(r, max_intensity), scale8(g, max_intensity), scale8(b, max_intensity));
+}
+
+static bool HEART_AEMEATH(effect_params_t *params) {
+    const uint8_t max_intensity = rgb_matrix_config.hsv.v;
+    static uint8_t heart_cx = 0, heart_cy = 0;
+
+    if (params->init) {
+        heart_aemeath_calc_center(&heart_cx, &heart_cy);
+        heart_aemeath_stardust_init();
+    }
+
+    if (max_intensity == 0) return false;
+
+    uint32_t now = timer_read32();
+    heart_aemeath_update_timing(now);
+    heart_aemeath_stardust_spawn(now);
+
+    for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
+        if (heart_aemeath_led_in_region(i)) {
+            heart_aemeath_set_heart_color(i, max_intensity);
+        } else {
+            heart_aemeath_set_bg_color(i, heart_cx, heart_cy, max_intensity);
+        }
+    }
+
+    return false;
+}
 
 #endif // RGB_MATRIX_CUSTOM_EFFECT_IMPLS
