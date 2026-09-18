@@ -16,8 +16,26 @@
 #define HEART_RED_G 0
 #define HEART_RED_B 0
 
-#define BG_VAL_MIN 59
-#define BG_VAL_MAX 60
+// 波峰纹波颜色（可直接修改 RGB 数值）
+#define HEART_RIPPLE_R 255
+#define HEART_RIPPLE_G 0
+#define HEART_RIPPLE_B 0
+
+// 波谷纹波颜色（可直接修改 RGB 数值）
+#define HEART_VALLEY_RIPPLE_R 0
+#define HEART_VALLEY_RIPPLE_G 0
+#define HEART_VALLEY_RIPPLE_B 255
+
+// 星尘颜色（可直接修改 RGB 数值）
+#define HEART_STARDUST_R 255
+#define HEART_STARDUST_G 0
+#define HEART_STARDUST_B 255
+
+// 心外 LED 默认背景色（可直接修改 RGB 数值）
+#define HEART_BG_R 255
+#define HEART_BG_G 0
+#define HEART_BG_B 0
+#define HEART_BG_BRIGHTNESS 10
 
 // 心跳周期范围（由 VIA 速度控制映射到此区间）
 #define HEARTBEAT_PERIOD_SLOW_MS 2400
@@ -47,6 +65,7 @@ static const uint8_t HEART_LEDS[HEART_LED_COUNT] = {
 static uint16_t heart_phase = 0;  // 0..255
 static uint8_t  heart_pulse = 0;  // 0..255，三角波
 static bool     heart_ripple_active = false;
+static bool     heart_valley_ripple = false;
 static uint16_t heart_ripple_phase = 0;  // 纹波独立相位，峰值出现即开始推进
 
 static bool heart_aemeath_led_in_region(uint8_t led) {
@@ -98,27 +117,31 @@ static void heart_aemeath_update_timing(uint32_t now) {
     if (elapsed < pause) {
         // 峰值停顿：峰值出现时同步触发纹波。
         heart_ripple_active = true;
+        heart_valley_ripple = false;
         heart_phase = 0;
         heart_pulse = 255;
         heart_ripple_phase = (uint16_t)((uint32_t)elapsed * 128 / pause);
     } else if (elapsed < pause + half) {
         // 从峰值下降到谷值，纹波随峰值同步向外扩散。
         heart_ripple_active = true;
+        heart_valley_ripple = false;
         heart_phase = (uint16_t)((uint32_t)(elapsed - pause) * 128 / half);
         heart_pulse = 255 - heart_phase * 2;
         heart_ripple_phase = (uint16_t)(128 + (uint32_t)(elapsed - pause) * 128 / half);
     } else if (elapsed < pause + half + pause) {
-        // 谷值停顿一个周期，且不重复触发纹波。
-        heart_ripple_active = false;
+        // 谷值停顿一个周期：谷值出现时同步触发蓝色纹波。
+        heart_ripple_active = true;
+        heart_valley_ripple = true;
         heart_phase = 128;
         heart_pulse = 0;
-        heart_ripple_phase = 255;
+        heart_ripple_phase = (uint16_t)((uint32_t)(elapsed - pause - half) * 128 / pause);
     } else {
         // 从谷值回升到下一次峰值。
-        heart_ripple_active = false;
+        heart_ripple_active = true;
+        heart_valley_ripple = true;
         heart_phase = (uint16_t)(128 + (uint32_t)(elapsed - pause - half - pause) * 128 / half);
         heart_pulse = (heart_phase - 128) * 2;
-        heart_ripple_phase = 255;
+        heart_ripple_phase = (uint16_t)(128 + (uint32_t)(elapsed - pause - half - pause) * 128 / half);
     }
 }
 
@@ -230,28 +253,30 @@ static void heart_aemeath_set_heart_color(uint8_t led, uint8_t max_intensity) {
 // --- 心外 LED 颜色 ---
 static void heart_aemeath_set_bg_color(uint8_t led, uint8_t heart_cx, uint8_t heart_cy,
                                         uint8_t max_intensity) {
-    uint8_t bg_val = BG_VAL_MIN;
-    uint8_t bg_r   = bg_val;
-    uint8_t bg_g   = scale8(bg_val, 80);
-    uint8_t bg_b   = scale8(bg_val, 160);
+    uint8_t bg_r = scale8(HEART_BG_R, HEART_BG_BRIGHTNESS);
+    uint8_t bg_g = scale8(HEART_BG_G, HEART_BG_BRIGHTNESS);
+    uint8_t bg_b = scale8(HEART_BG_B, HEART_BG_BRIGHTNESS);
 
     uint8_t ripple = heart_aemeath_ripple(
         g_led_config.point[led].x, g_led_config.point[led].y,
         heart_cx, heart_cy);
 
-    uint8_t ripple_r = scale8(ripple, 255);
-    uint8_t ripple_g = scale8(ripple, 0);
-    uint8_t ripple_b = scale8(ripple, 40);
+    const uint8_t ripple_r = heart_valley_ripple ? HEART_VALLEY_RIPPLE_R : HEART_RIPPLE_R;
+    const uint8_t ripple_g = heart_valley_ripple ? HEART_VALLEY_RIPPLE_G : HEART_RIPPLE_G;
+    const uint8_t ripple_b = heart_valley_ripple ? HEART_VALLEY_RIPPLE_B : HEART_RIPPLE_B;
+    uint8_t ripple_color_r = scale8(ripple, ripple_r);
+    uint8_t ripple_color_g = scale8(ripple, ripple_g);
+    uint8_t ripple_color_b = scale8(ripple, ripple_b);
 
     uint8_t dust = heart_aemeath_stardust_get(led, timer_read32());
     dust = scale8(dust, STARDust_MAX_BRIGHT);
-    uint8_t dust_r = scale8(dust, 200);
-    uint8_t dust_g = scale8(dust, 220);
-    uint8_t dust_b = scale8(dust, 255);
+    uint8_t dust_r = scale8(dust, HEART_STARDUST_R);
+    uint8_t dust_g = scale8(dust, HEART_STARDUST_G);
+    uint8_t dust_b = scale8(dust, HEART_STARDUST_B);
 
-    uint8_t r = qadd8(bg_r, ripple_r);
-    uint8_t g = qadd8(bg_g, ripple_g);
-    uint8_t b = qadd8(bg_b, ripple_b);
+    uint8_t r = qadd8(bg_r, ripple_color_r);
+    uint8_t g = qadd8(bg_g, ripple_color_g);
+    uint8_t b = qadd8(bg_b, ripple_color_b);
 
     r = qadd8(r, scale8(dust_r, 255 - r));
     g = qadd8(g, scale8(dust_g, 255 - g));
