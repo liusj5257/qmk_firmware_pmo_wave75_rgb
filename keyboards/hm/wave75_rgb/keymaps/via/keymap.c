@@ -59,3 +59,19 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][2] = {
     [3] = { ENCODER_CCW_CW(RGB_SPD, RGB_SPI) }
 };
 #endif
+
+// The keyboard library implements the logo lighting through the RGBLight
+// channel/values (see the "logo" menu in WAVE 75 RGB.JSON). QMK has no RGBLight
+// driver enabled here, so channel 2 would fall through to the default handler
+// and be reported as unhandled. Route it to the library instead.
+void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
+    uint8_t *channel_id = &(data[1]);
+
+    if (*channel_id == id_qmk_rgblight_channel) {
+        User_Via_Qmk_Logo_Command(data, length);
+        return;
+    }
+
+    // Everything else is not handled by the keyboard
+    *data = id_unhandled;
+}
