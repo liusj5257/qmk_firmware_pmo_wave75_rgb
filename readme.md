@@ -1,7 +1,51 @@
 # PMO_WAVE75_RGB 官方固件移植到最新版仓库
 
-## 这个三方库需要修改宏定义才能编译成功
-<img width="2145" height="375" alt="image" src="https://github.com/user-attachments/assets/b1937c70-34d1-40c0-a3ed-90dfba25eee6" />
+本仓库把 PMO WAVE 75 RGB（`hm/wave75_rgb`）的官方固件移植到最新版 QMK。
+厂商未提供源码的预编译库 `lib/rdr_lib/librdrcommon.a` 已随仓库提供，无需另外下载。
+
+## 编译步骤
+
+1. 拉取子模块（首次 clone 后执行一次）：
+
+   ```bash
+   git submodule update --init --recursive
+   ```
+
+2. **修复子模块里的宏定义**（上游未修，不改会编译失败）：
+
+   ```bash
+   # Git Bash / QMK MSYS
+   ./scripts/fix-chibios-contrib.sh
+   ```
+
+   ```powershell
+   # Windows PowerShell
+   powershell -ExecutionPolicy Bypass -File .\scripts\fix-chibios-contrib.ps1
+   ```
+
+   原因：`lib/chibios-contrib/os/common/ext/CMSIS/ES32/FS026/system_fs026.h` 里
+   `#ifndef __SYSTEM_FS026_H__` 对应的却是 `#define __SYSTEM_ES32F0283_H__`，
+   宏名不一致，重复包含时会报错：
+
+   <img width="2145" height="375" alt="image" src="https://github.com/user-attachments/assets/b1937c70-34d1-40c0-a3ed-90dfba25eee6" />
+
+3. 编译 `via` 版本固件：
+
+   ```bash
+   make hm/wave75_rgb:via -j2
+   # 或
+   qmk compile -kb hm/wave75_rgb -km via
+   ```
+
+   产物在 `.build/hm_wave75_rgb_via.bin`（同时会复制一份到仓库根目录）。
+
+## 说明
+
+- `lib/rdr_lib/librdrcommon.a` 是厂商预编译库（无法提供源码），入库以保证 clone 后可直接编译。
+  `*.a` 默认被 `.gitignore` 忽略，仓库里已为该文件加了例外规则。
+  SHA256：`CEA2276AE9D5B092F81536F7BCE68BBDCC37DA0C1B3D0F1D8F665A762294F94B`
+- 用 VIA 改键/改灯需要刷 `via` 版本固件，然后在 `usevia.app`（Chrome/Edge）的 Design 标签里
+  导入 `keyboards/hm/wave75_rgb/WAVE 75 RGB.JSON`，再切到 Configure 配置。
 
 
 
