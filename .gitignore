@@ -19,6 +19,8 @@
 *.map
 *.o
 *.a
+# Vendor prebuilt library: required to link hm/wave75_rgb (LDFLAGS -lrdrcommon)
+!lib/rdr_lib/librdrcommon.a
 *.so
 *.dylib
 *.dll
